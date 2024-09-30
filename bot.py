@@ -7,15 +7,19 @@ from aiogram import Bot, Dispatcher, html
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, URLInputFile
+from aiogram.types import Message, CallbackQuery, URLInputFile, ReplyKeyboardRemove
+from aiogram.fsm.context import FSMContext
 from config import BOT_TOKEN as TOKEN
+from config import USER_ADMIN
 from commands import (FILMS_COMMAND,
+                      FILMS_CREATE,
                       FILMS_COMMAND_BOT,
                       START_COMMAND_BOT,
                       CREATE_COMMAND_BOT,
                       )
 from keyboards import films_keyboard_markup, FilmCallback
 from model import Film
+from state import FilmForm
 
 # Bot token can be obtained via https://t.me/BotFather
 
@@ -48,6 +52,89 @@ async def films_handler(message: Message) -> None:
         f"Список фільмів. Натисніть на назву для деталей", reply_markup=markup
     )
 
+
+@dp.message(FILMS_CREATE)
+async def films_create(message: Message, state: FSMContext) -> None:
+    if message.from_user.id == USER_ADMIN:
+        await state.set_state(FilmForm.name)
+        await message.answer(f"Введіть назву фільму", reply_markup=ReplyKeyboardRemove())
+    else:
+        await message.answer(f"Доступно тільки адміну", reply_markup=ReplyKeyboardRemove())
+
+
+@dp.message(FilmForm.name)
+async def films_name(message: Message, state: FSMContext) -> None:
+    await state.update_data(name=message.text)
+    await state.set_state(FilmForm.description)
+    await message.answer(f"Введіть опис фільму", reply_markup=ReplyKeyboardRemove())
+
+
+@dp.message(FilmForm.description)
+async def film_description(message: Message, state: FSMContext) -> None:
+    await state.update_data(description=message.text)
+    await message.answer(
+        f"Вкажіть рейтинг фільму від 0 до 10.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await state.set_state(FilmForm.rating)
+
+
+@dp.message(FilmForm.rating)
+async def film_rating(message: Message, state: FSMContext) -> None:
+    await state.update_data(rating=message.text)
+    await message.answer(
+        f"Введіть жанр фільму.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await state.set_state(FilmForm.genre)
+
+
+@dp.message(FilmForm.genre)
+async def films_genre(message: Message, state: FSMContext) -> None:
+    await state.update_data(genre=message.text)
+    await message.answer(
+        text=f"Введіть акторів фільму через роздільник ', '\n"
+             + html.bold("Обов'язкова кома та відступ після неї."),
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await state.set_state(FilmForm.actors)
+
+
+@dp.message(FilmForm.actors)
+async def films_actors(message: Message, state: FSMContext) -> None:
+    await state.update_data(actors=message.text.split(", "))
+    await message.answer(
+        f"Введіть посилання на постер фільму.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await state.set_state(FilmForm.poster)
+
+
+
+@dp.message(FilmForm.poster)
+async def film_poster(message: Message, state: FSMContext) -> None:
+    data = await state.update_data(poster=message.text)
+    film_data = Film(**data)
+    print(film_data)
+    print(film_data.model_dump())
+    add_film(film_data.model_dump())
+    await state.clear()
+    await message.answer(
+        f"Фільм {film_data.name} успішно додано.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+def add_film(film: dict, file_path: str = "data.json"):
+    films = get_films(file_path=file_path, film_id=None)
+    if films:
+        films.append(film)
+        with open(file_path, "w", encoding="utf-8") as fp:
+            json.dump(
+                films,
+                fp,
+                indent=4,
+                ensure_ascii=False
+            )
 
 @dp.callback_query(FilmCallback.filter())
 async def callb_film(callback: CallbackQuery, callback_data: FilmCallback) -> None:
